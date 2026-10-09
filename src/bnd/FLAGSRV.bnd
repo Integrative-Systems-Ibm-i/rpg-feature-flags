@@ -1,0 +1,10 @@
+/* Binder source for FLAGSRV *SRVPGM.                                    */
+/* Signature is fixed by name; add new exports at the END of the current */
+/* level so existing consumers keep binding without a recompile.         */
+STRPGMEXP PGMLVL(*CURRENT) SIGNATURE('FLAGSRV_V1')
+  EXPORT SYMBOL('FLAG_ISON')
+  EXPORT SYMBOL('FLAG_ISONFOR')
+  EXPORT SYMBOL('FLAG_REFRESH')
+  EXPORT SYMBOL('FLAG_SETTTL')
+  EXPORT SYMBOL('FLAG_CACHEDCOUNT')
+ENDPGMEXP

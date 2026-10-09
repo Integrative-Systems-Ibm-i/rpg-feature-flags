@@ -1,0 +1,74 @@
+/* ===================================================================== */
+/*  BUILDALL  -  Build the whole feature flag system from the git repo.  */
+/*                                                                       */
+/*  Params:                                                              */
+/*    ROOT   IFS path to the repo root (holds src/, test/)               */
+/*    DATLIB Library for the flag DATA objects (env-specific)            */
+/*    OBJLIB Library for the CODE objects (FLAGSRV, module, FLAGBND)     */
+/*    TSTLIB Library for the RPGUnit test program (*NONE to skip tests)  */
+/*                                                                       */
+/*  Compile this program once:                                          */
+/*    CRTBNDCL PGM(yourlib/BUILDALL) SRCSTMF('build/BUILDALL.clle')      */
+/*  Then run, e.g.:                                                     */
+/*    CALL BUILDALL ('/home/dev/rpg-feature-flags' 'FLGDEV' 'FLGDEV'    */
+/*                    'FLGUT')                                           */
+/* ===================================================================== */
+             PGM        PARM(&ROOT &DATLIB &OBJLIB &TSTLIB)
+
+             DCL        VAR(&ROOT)   TYPE(*CHAR) LEN(256)
+             DCL        VAR(&DATLIB) TYPE(*CHAR) LEN(10)
+             DCL        VAR(&OBJLIB) TYPE(*CHAR) LEN(10)
+             DCL        VAR(&TSTLIB) TYPE(*CHAR) LEN(10) VALUE('*NONE')
+
+             /* Resolve stream files relative to the repo root. */
+             CHGCURDIR  DIR(&ROOT)
+
+             /* --- Libraries (ignore "already exists") --------------- */
+             CRTLIB     LIB(&DATLIB) TEXT('Feature flag data')
+             MONMSG     MSGID(CPF2111)
+             CRTLIB     LIB(&OBJLIB) TEXT('Feature flag objects')
+             MONMSG     MSGID(CPF2111)
+
+             /* --- Data model + admin procedures into DATLIB --------- */
+             RUNSQLSTM  SRCSTMF('src/ddl/01_tables.sql') +
+                          COMMIT(*NONE) DFTRDBCOL(&DATLIB)
+             RUNSQLSTM  SRCSTMF('src/ddl/02_procedures.sql') +
+                          COMMIT(*NONE) DFTRDBCOL(&DATLIB)
+
+             /* --- Journal the flag tables for audit (best effort) --- */
+             CRTJRNRCV  JRNRCV(&DATLIB/FLAGRCV0)
+             MONMSG     MSGID(CPF7010)
+             CRTJRN     JRN(&DATLIB/QSQJRN) JRNRCV(&DATLIB/FLAGRCV0)
+             MONMSG     MSGID(CPF7010)
+             STRJRNPF   FILE(&DATLIB/FLAGDEF &DATLIB/FLAGUSR) +
+                          JRN(&DATLIB/QSQJRN) IMAGES(*BOTH)
+             MONMSG     MSGID(CPF7030)
+
+             /* --- Service program: module -> *SRVPGM ---------------- */
+             CRTSQLRPGI OBJ(&OBJLIB/FLAGSRV) +
+                          SRCSTMF('src/sqlrpgle/FLAGSRV.sqlrpgle') +
+                          OBJTYPE(*MODULE) DBGVIEW(*SOURCE) COMMIT(*NONE)
+
+             DLTSRVPGM  SRVPGM(&OBJLIB/FLAGSRV)
+             MONMSG     MSGID(CPF2105)
+             CRTSRVPGM  SRVPGM(&OBJLIB/FLAGSRV) MODULE(&OBJLIB/FLAGSRV) +
+                          SRCSTMF('src/bnd/FLAGSRV.bnd') +
+                          ACTGRP(FLAGS) USRPRF(*OWNER)
+
+             /* --- Binding directory for consumers ------------------- */
+             CRTBNDDIR  BNDDIR(&OBJLIB/FLAGBND)
+             MONMSG     MSGID(CPF5D0C)   /* already exists */
+             ADDBNDDIRE BNDDIR(&OBJLIB/FLAGBND) +
+                          OBJ((&OBJLIB/FLAGSRV *SRVPGM))
+             MONMSG     MSGID(CPF980B)   /* entry already present */
+
+             /* --- RPGUnit test program (optional) ------------------- */
+             IF         COND(&TSTLIB *NE '*NONE') THEN(DO)
+               RUCRTTST TSTPGM(&TSTLIB/FLAGSRVT) +
+                          SRCSTMF('test/FLAGSRVT.sqlrpgle') +
+                          BNDDIR(&OBJLIB/FLAGBND) COMMIT(*NONE)
+             ENDDO
+
+             SNDPGMMSG  MSG('Feature flag build complete.') +
+                          MSGTYPE(*COMP)
+             ENDPGM

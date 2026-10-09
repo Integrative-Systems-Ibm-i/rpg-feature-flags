@@ -1,0 +1,38 @@
+**free
+// =====================================================================
+//  FLAGSRV_H  -  Feature flag service program prototypes.
+//
+//  Consumers:  /copy 'src/copy/FLAGSRV_H.rpgleinc'   (or QRPGLESRC member)
+//              ctl-opt bnddir('FLAGBND');
+//
+//  See docs/feature-flags-design.md for the full design.
+// =====================================================================
+/if not defined(FLAGSRV_H)
+/define FLAGSRV_H
+
+/// Evaluate a flag for the CURRENT JOB USER. Returns *ON / *OFF.
+/// Unknown, retired, or errored flags resolve to the fail-safe default (OFF).
+dcl-pr flag_isOn ind extproc(*dclcase);
+  name varchar(50) const;
+end-pr;
+
+/// Evaluate a flag for an EXPLICIT user profile. Returns *ON / *OFF.
+dcl-pr flag_isOnFor ind extproc(*dclcase);
+  name varchar(50) const;
+  user char(10)     const;
+end-pr;
+
+/// Force the in-job cache to reload on the next evaluation.
+dcl-pr flag_refresh extproc(*dclcase);
+end-pr;
+
+/// Override the cache TTL (seconds) for this job. Min 0 (= always check version).
+dcl-pr flag_setTtl extproc(*dclcase);
+  seconds int(10) const;
+end-pr;
+
+/// Diagnostics: number of flag definitions currently cached in this job.
+dcl-pr flag_cachedCount int(10) extproc(*dclcase);
+end-pr;
+
+/end-if
