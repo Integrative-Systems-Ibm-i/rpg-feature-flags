@@ -90,10 +90,18 @@ jobs:
       - name: Verify the objects are the ones we just built
         run: |
           LIB='${{ steps.target.outputs.lib }}'
-          ssh -i "$HOME/.ssh/$SSH_KEY_NAME" -o BatchMode=yes -o StrictHostKeyChecking=no \
-              -o IdentitiesOnly=yes "$IBMI_USER@$IBMI_HOST" \
-              "system \"RUNSQL SQL('CREATE OR REPLACE TABLE QTEMP.CIOUT AS (SELECT OBJNAME, OBJTYPE, OBJCREATED FROM TABLE(QSYS2.OBJECT_STATISTICS(''$LIB'', ''*ALL'')) WHERE OBJNAME LIKE ''DEMO%'') WITH DATA') COMMIT(*NONE)\" >/dev/null 2>&1;
-               system \"RUNQRY QRYFILE((QTEMP/CIOUT))\"" | grep -E 'DEMO|OBJNAME' | head -6
+          # One system call: QTEMP is per-job, and every PASE `system` invocation
+          # gets its own job, so anything staged in QTEMP would already be gone.
+          ssh -i "$HOME/.ssh/$SSH_KEY_NAME" -o BatchMode=yes \
+              -o StrictHostKeyChecking=no -o IdentitiesOnly=yes \
+              "$IBMI_USER@$IBMI_HOST" \
+              "system 'DSPOBJD OBJ($LIB/DEMO01*) OBJTYPE(*ALL)'" \
+            | grep -E 'DEMO01' | tee objects.txt
+          if ! grep -q 'DEMO01 ' objects.txt; then
+            echo "::error::DEMO01 program not found in $LIB after the build"
+            exit 1
+          fi
+          echo "::notice::Built DEMO01 and DEMO01D into $LIB"
 
       - name: Clean up the staged source
         if: always()
