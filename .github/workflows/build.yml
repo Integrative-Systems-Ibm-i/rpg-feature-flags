@@ -17,7 +17,9 @@ jobs:
     env:
       IBMI_HOST: ${{ vars.IBMI_HOST }}
       IBMI_USER: ${{ vars.IBMI_USER }}
-      SSH_KEY: ~/.ssh/ibmi_demo
+      # NOTE: must be an absolute path. A quoted variable holding "~"
+      # is not tilde-expanded by the shell, so $HOME is resolved per step.
+      SSH_KEY_NAME: ibmi_demo
 
     steps:
       - name: Check out the source
@@ -42,11 +44,19 @@ jobs:
       - name: Copy the source to the IBM i
         run: |
           REMOTE='${{ steps.target.outputs.remote }}'
+          KEY="$HOME/.ssh/$SSH_KEY_NAME"
+          echo "runner user : $(whoami)"
+          echo "key path    : $KEY"
+          test -f "$KEY" || { echo "::error::SSH key not found at $KEY"; exit 1; }
+          ssh -i "$KEY" -o BatchMode=yes -o StrictHostKeyChecking=no \
+              -o IdentitiesOnly=yes -o ConnectTimeout=10 \
+              "$IBMI_USER@$IBMI_HOST" "echo SSH-OK" \
+            || { echo "::error::SSH to $IBMI_USER@$IBMI_HOST failed"; exit 1; }
           # COPYFILE_DISABLE keeps macOS from shipping ._AppleDouble files.
           # PASE tar is AIX tar: no -z, so send it uncompressed.
           COPYFILE_DISABLE=1 tar cf - \
             --exclude='.git' --exclude='.env' --exclude='.DS_Store' . \
-          | ssh -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=no \
+          | ssh -i "$HOME/.ssh/$SSH_KEY_NAME" -o BatchMode=yes -o StrictHostKeyChecking=no \
                 -o IdentitiesOnly=yes "$IBMI_USER@$IBMI_HOST" \
                 "rm -rf $REMOTE && mkdir -p $REMOTE && cd $REMOTE && tar xf -"
 
@@ -54,7 +64,7 @@ jobs:
         run: |
           REMOTE='${{ steps.target.outputs.remote }}'
           LIB='${{ steps.target.outputs.lib }}'
-          ssh -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=no \
+          ssh -i "$HOME/.ssh/$SSH_KEY_NAME" -o BatchMode=yes -o StrictHostKeyChecking=no \
               -o IdentitiesOnly=yes "$IBMI_USER@$IBMI_HOST" \
               "system \"CRTLIB LIB($LIB) TEXT('CI build')\" >/dev/null 2>&1;
                system \"CRTBNDCL PGM($LIB/BUILDDEMO) SRCSTMF('$REMOTE/build/BUILDDEMO.clle')\""
@@ -67,7 +77,7 @@ jobs:
           # the program reading past the end of the value, so pad it.
           ROOT_PADDED=$(printf '%-256s' "$REMOTE")
           LIB_PADDED=$(printf '%-10s' "$LIB")
-          ssh -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=no \
+          ssh -i "$HOME/.ssh/$SSH_KEY_NAME" -o BatchMode=yes -o StrictHostKeyChecking=no \
               -o IdentitiesOnly=yes "$IBMI_USER@$IBMI_HOST" \
               "system \"CALL PGM($LIB/BUILDDEMO) PARM('$ROOT_PADDED' '$LIB_PADDED')\"" \
             | tee build.log
@@ -80,7 +90,7 @@ jobs:
       - name: Verify the objects are the ones we just built
         run: |
           LIB='${{ steps.target.outputs.lib }}'
-          ssh -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=no \
+          ssh -i "$HOME/.ssh/$SSH_KEY_NAME" -o BatchMode=yes -o StrictHostKeyChecking=no \
               -o IdentitiesOnly=yes "$IBMI_USER@$IBMI_HOST" \
               "system \"RUNSQL SQL('CREATE OR REPLACE TABLE QTEMP.CIOUT AS (SELECT OBJNAME, OBJTYPE, OBJCREATED FROM TABLE(QSYS2.OBJECT_STATISTICS(''$LIB'', ''*ALL'')) WHERE OBJNAME LIKE ''DEMO%'') WITH DATA') COMMIT(*NONE)\" >/dev/null 2>&1;
                system \"RUNQRY QRYFILE((QTEMP/CIOUT))\"" | grep -E 'DEMO|OBJNAME' | head -6
@@ -89,6 +99,6 @@ jobs:
         if: always()
         run: |
           REMOTE='${{ steps.target.outputs.remote }}'
-          ssh -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=no \
+          ssh -i "$HOME/.ssh/$SSH_KEY_NAME" -o BatchMode=yes -o StrictHostKeyChecking=no \
               -o IdentitiesOnly=yes "$IBMI_USER@$IBMI_HOST" \
               "rm -rf $REMOTE" || true
