@@ -36,10 +36,13 @@
              /* still running on someone's 5250 screen. Say so plainly.    */
              DLTF       FILE(&LIB/DEMO01D)
              MONMSG     MSGID(CPF2105)
+             /* An *ESCAPE message needs a MSGID - immediate text is not  */
+             /* allowed - so use CPF9898, the general-purpose message.     */
              MONMSG     MSGID(CPF0000) EXEC(DO)
-               SNDPGMMSG  MSG('Cannot replace DEMO01D - it is locked. Is +
-                            DEMO01 still running on a 5250 screen? Press +
-                            F3 to exit it, then rebuild.') MSGTYPE(*ESCAPE)
+               SNDPGMMSG  MSGID(CPF9898) MSGF(QCPFMSG) MSGTYPE(*ESCAPE) +
+                            MSGDTA('Cannot replace DEMO01D: it is locked. +
+                            Is DEMO01 still running on a 5250 screen? +
+                            Press F3 to exit it, then rebuild.')
              ENDDO
              CRTDSPF    FILE(&LIB/DEMO01D) SRCFILE(&LIB/QDDSSRC) +
                           SRCMBR(DEMO01D)
