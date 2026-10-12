@@ -86,4 +86,7 @@ MODIFIES SQL DATA
 BEGIN
   DELETE FROM flagusr
    WHERE flag_name = UPPER(p_name) AND user_profile = UPPER(p_user);
+  -- FLAGUSR has no DELETE trigger (see 01_tables.sql), so bump the version
+  -- stamp here or running jobs would keep serving the cleared override.
+  UPDATE flagctl SET version_ts = CURRENT_TIMESTAMP WHERE singleton = '1';
 END;

@@ -61,17 +61,23 @@ endif;
 src/
   copy/FLAGSRV_H.rpgleinc     prototype copybook consumers /copy
   sqlrpgle/FLAGSRV.sqlrpgle   service program (embedded SQL, NOMAIN)
+  sqlrpgle/DEMO01.sqlrpgle    worked example: a 5250 screen driven by a flag
+  dspf/DEMO01D.dspf           display file for the example
   bnd/FLAGSRV.bnd             binder source (frozen signature FLAGSRV_V1)
   ddl/01_tables.sql           tables, version-bump triggers, flagview
   ddl/02_procedures.sql       admin stored procedures
   README.md                   component build reference
 build/
-  BUILDALL.clle               one CL program that builds from IFS stream files
-  BUILDLIB.clle               one CL program that builds from INTGRTV source members
+  BUILDALL.clle               builds the system from IFS stream files
+  BUILDLIB.clle               builds the system from INTGRTV source members
+  BUILDDEMO.clle              builds the whole stack + the DEMO01 example
 test/
   FLAGSRVT.sqlrpgle           RPGUnit test suite
 docs/
   feature-flags-design.md     full design document
+.github/workflows/
+  build.yml                   CI: push or PR builds on a real IBM i
+  README.md                   CI setup and the traps worth knowing
 ```
 
 ---
@@ -110,8 +116,11 @@ library (`FLGDEV`, `FLGTST`, `FLGPRD`) — same object names in every one.
 RUNSQLSTM SRCSTMF('src/ddl/01_tables.sql')     COMMIT(*NONE) DFTRDBCOL(FLGDEV)
 RUNSQLSTM SRCSTMF('src/ddl/02_procedures.sql') COMMIT(*NONE) DFTRDBCOL(FLGDEV)
 
-/* Enable journaling for audit */
-STRJRNPF FILE(FLGDEV/FLAGDEF FLGDEV/FLAGUSR) JRN(FLGDEV/QSQJRN) IMAGES(*BOTH)
+/* Journaling is REQUIRED, not just for audit: without it the admin
+   procedures fail with SQL7008 when they try to write.                  */
+CRTJRNRCV JRNRCV(FLGDEV/FLAGRCV0)
+CRTJRN    JRN(FLGDEV/QSQJRN) JRNRCV(FLGDEV/FLAGRCV0)
+STRJRNPF  FILE(FLGDEV/FLAGDEF FLGDEV/FLAGUSR) JRN(FLGDEV/QSQJRN) IMAGES(*BOTH)
 ```
 
 **2. Build the service program**
@@ -119,6 +128,7 @@ STRJRNPF FILE(FLGDEV/FLAGDEF FLGDEV/FLAGUSR) JRN(FLGDEV/QSQJRN) IMAGES(*BOTH)
 ```cl
 CRTSQLRPGI OBJ(yourlib/FLAGSRV) SRCSTMF('src/sqlrpgle/FLAGSRV.sqlrpgle')
            OBJTYPE(*MODULE) DBGVIEW(*SOURCE) COMMIT(*NONE)
+           CVTCCSID(*JOB)     /* required: IFS source is UTF-8 (CCSID 1208)  */
 
 CRTSRVPGM  SRVPGM(yourlib/FLAGSRV) MODULE(yourlib/FLAGSRV)
            SRCSTMF('src/bnd/FLAGSRV.bnd')
@@ -310,6 +320,85 @@ shorten the window for interactive/QA jobs.
 
 ---
 
+## The worked example — `DEMO01`
+
+`DEMO01` is a small 5250 program that exists to make the point visible: **one program,
+two behaviours, no recompile and no job restart.**
+
+```
+ADDLIBLE LIB(FLGDEV)
+CALL FLGDEV/DEMO01
+```
+
+The screen shows a list price and what you actually pay. With `NEW_PRICING` on it
+applies a 15% loyalty discount; with it off you get the classic price. Flip the flag
+from anywhere — another 5250 session, Run SQL Scripts, VS Code — and press **F5**:
+
+```sql
+CALL FLGDEV.FLAG_SET('NEW_PRICING','N');
+```
+
+It binds to `FLAGSRV` the same way any consumer would: `ctl-opt bnddir('FLAGBND')`,
+`/copy` the prototypes, then `flag_isOn('NEW_PRICING')`. Nothing special.
+
+> **Why F5 calls `flag_refresh()` first.** Without it the screen would not change,
+> because `FLAGSRV` is serving a warm cache hit — no I/O at all until the TTL expires
+> (default 60s). That is the service program working correctly, not a bug. `F5` forces
+> the reload, which is exactly what `flag_refresh()` is exported for.
+
+Build it with `build/BUILDDEMO.clle`, which builds the whole stack — data model,
+journal, service program, display file, program — into one library:
+
+```cl
+CRTBNDCL PGM(FLGDEV/BUILDDEMO) SRCSTMF('build/BUILDDEMO.clle')
+CALL FLGDEV/BUILDDEMO ('/home/you/rpg-feature-flags' 'FLGDEV')
+```
+
+> **Pad the parameters.** `ROOT` is `CHAR(256)` and `LIB` is `CHAR(10)`. Passing a
+> shorter literal leaves the program reading past the end of the value, which shows up
+> as a confusing `CPFA0A9` on the first `CHGCURDIR`.
+
+> **Exit the program before rebuilding.** A running `DEMO01` holds a lock on the
+> display file and the build cannot replace it. `BUILDDEMO` says so in plain words
+> rather than failing with a bare `CPF0610`.
+
+---
+
+## Continuous integration
+
+`.github/workflows/build.yml` builds this repo on a real IBM i on every push to `main`
+and every pull request.
+
+```
+   GitHub  ──(runner polls outbound)──►  runner machine  ──(SSH, local)──►  IBM i
+   source + workflow                     runs the job                       compiles
+```
+
+**GitHub never reaches the IBM i**, and **no IBM i credential is stored in GitHub**. The
+runner is self-hosted inside your network and reads its SSH key off local disk at run
+time. See [`.github/workflows/README.md`](.github/workflows/README.md) for setup.
+
+**A branch gets its own library.** `main` builds into `FLGDEV`; any other branch builds
+into a library named after it (`feature/pricing` → `FLGFEATURE`). `BUILDDEMO` builds the
+*entire* stack, so a branch library starts empty and ends with a complete, working copy
+of the system — which is how you get branch isolation on a platform with one set of
+objects per library.
+
+```
+DSPOBJD OBJ(FLGDEV/DEMO01) OBJTYPE(*PGM)
+DSPOBJD OBJ(FLGFEATURE/DEMO01) OBJTYPE(*PGM)
+```
+
+The pipeline uses [`ibmi-ci`](https://github.com/IBM/ibmi-ci) (`ici`): `--push` uploads
+the working tree while skipping `.git` and dotfiles, and `--cl` runs CL directly with no
+`system "..."` quoting to fight.
+
+> **Each `--cl` still gets its own job**, so a library list set in one does not carry to
+> the next — verified directly. That is why the real build lives in a CL program, which
+> does its own `ADDLIBLE` and runs everything in one job.
+
+---
+
 ## Running the tests
 
 Point the test job's library list at a throwaway data library (e.g. `FLGUT`) that
@@ -334,6 +423,11 @@ When adding a new procedure to `FLAGSRV`, append its `EXPORT SYMBOL(...)` at the
 **end** of the `*CURRENT` block in [`src/bnd/FLAGSRV.bnd`](src/bnd/FLAGSRV.bnd) — do
 not reorder existing entries — so the `FLAGSRV_V1` signature stays compatible and
 existing consumers need no recompile.
+
+> **Use double quotes around the symbol.** The prototypes use `extproc(*dclcase)`, so
+> the module exports mixed-case names (`flag_isOn`). Binder language folds a
+> *single*-quoted symbol to upper case, and the bind then fails with `CPF5D05` —
+> an error that says nothing about letter case. Write `EXPORT SYMBOL("flag_newThing")`.
 
 Deferred (not in v1, but the data model leaves room): percentage rollouts/segments,
 flag scheduling, multivariate values, per-flag fail-open, and a web admin UI over

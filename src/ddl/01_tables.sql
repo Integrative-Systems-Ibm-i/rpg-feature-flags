@@ -53,7 +53,12 @@ CREATE TRIGGER flagdef_ver AFTER INSERT OR UPDATE OR DELETE ON flagdef
   FOR EACH STATEMENT
   UPDATE flagctl SET version_ts = CURRENT_TIMESTAMP WHERE singleton = '1';
 
-CREATE TRIGGER flagusr_ver AFTER INSERT OR UPDATE OR DELETE ON flagusr
+-- NOTE: DELETE is deliberately absent. FLAGUSR is the dependent of an
+-- ON DELETE CASCADE relationship with FLAGDEF, and Db2 for i rejects a DELETE
+-- trigger on such a table (SQL0675). Deletes are covered two other ways:
+--   * cascade from FLAGDEF fires FLAGDEF_VER, which bumps the version
+--   * a direct delete comes through flag_clearuser, which bumps it explicitly
+CREATE TRIGGER flagusr_ver AFTER INSERT OR UPDATE ON flagusr
   FOR EACH STATEMENT
   UPDATE flagctl SET version_ts = CURRENT_TIMESTAMP WHERE singleton = '1';
 
