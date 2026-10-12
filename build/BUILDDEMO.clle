@@ -31,8 +31,16 @@
              CPYFRMSTMF FROMSTMF(&STMF) TOMBR(&MBR) MBROPT(*REPLACE) +
                           STMFCCSID(1208) DBFCCSID(37)
 
+             /* CPF2105 = not there yet (fine). Anything else means the   */
+             /* display file is LOCKED - almost always because DEMO01 is   */
+             /* still running on someone's 5250 screen. Say so plainly.    */
              DLTF       FILE(&LIB/DEMO01D)
              MONMSG     MSGID(CPF2105)
+             MONMSG     MSGID(CPF0000) EXEC(DO)
+               SNDPGMMSG  MSG('Cannot replace DEMO01D - it is locked. Is +
+                            DEMO01 still running on a 5250 screen? Press +
+                            F3 to exit it, then rebuild.') MSGTYPE(*ESCAPE)
+             ENDDO
              CRTDSPF    FILE(&LIB/DEMO01D) SRCFILE(&LIB/QDDSSRC) +
                           SRCMBR(DEMO01D)
 
@@ -41,6 +49,8 @@
              MONMSG     MSGID(CPF2105)
              CHGVAR     VAR(&STMF) VALUE(&ROOT *TCAT +
                           '/src/sqlrpgle/DEMO01.sqlrpgle')
+             /* No BNDDIR parameter on CRTSQLRPGI - the binding directory */
+             /* is named in the source with ctl-opt bnddir('FLAGBND').     */
              CRTSQLRPGI OBJ(&LIB/DEMO01) SRCSTMF(&STMF) OBJTYPE(*PGM) +
                           COMMIT(*NONE) CVTCCSID(*JOB) DBGVIEW(*SOURCE)
 

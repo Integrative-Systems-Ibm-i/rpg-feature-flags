@@ -54,8 +54,8 @@ dcl-s ovrCount    int(10) inz(0);
 dcl-s cacheLoaded ind     inz(*off);
 dcl-s forceReload ind     inz(*off);
 dcl-s ttlSecs     int(10) inz(DFT_TTL);
-dcl-s cachedVer   timestamp inz(%timestamp('0001-01-01-00.00.00.000000'));
-dcl-s lastCheck   timestamp inz(%timestamp('0001-01-01-00.00.00.000000'));
+dcl-s cachedVer   timestamp inz(*loval);
+dcl-s lastCheck   timestamp inz(*loval);
 
 // Program status DS: position 254 (len 10) = job user profile, unaffected by
 // adopted authority (unlike SQL CURRENT_USER, which returns the owner here).
@@ -74,7 +74,7 @@ dcl-pr readVersion    ind;
   ver timestamp;
 end-pr;
 dcl-pr toUpper        varchar(50);
-  in varchar(50) const;
+  inText varchar(50) const;
 end-pr;
 
 // =====================================================================
@@ -267,7 +267,7 @@ end-proc;
 // =====================================================================
 dcl-proc toUpper;
   dcl-pi *n varchar(50);
-    in varchar(50) const;
+    inText varchar(50) const;
   end-pi;
-  return %xlate(LOWER : UPPER : in);
+  return %xlate(LOWER : UPPER : inText);
 end-proc;

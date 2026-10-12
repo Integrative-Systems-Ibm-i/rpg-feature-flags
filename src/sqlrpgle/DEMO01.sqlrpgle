@@ -16,11 +16,14 @@
 //  Run:
 //      CALL FLGDEV/DEMO01
 //
-//  NOTE: this reads FLAGDEF directly with embedded SQL rather than binding
-//  to FLAGSRV, so it stands alone. Swap checkFlag() for flag_isOn() once the
-//  service program is available.
+//  Uses the real FLAGSRV service program: flag_isOn() evaluates for the job
+//  user, honours per-user overrides in FLAGUSR, and uses the in-job cache.
+//  Requires FLGDEV/FLAGSRV and the FLAGBND binding directory.
 // =====================================================================
-ctl-opt dftactgrp(*no) actgrp(*new) option(*srcstmt : *nodebugio);
+ctl-opt dftactgrp(*no) actgrp(*new) option(*srcstmt : *nodebugio)
+        bnddir('FLAGBND');
+
+/copy 'src/copy/FLAGSRV_H.rpgleinc'
 
 // Resolved through *LIBL at both compile and run time, so the
 // environment-per-library-list design holds. BUILDDEMO does the ADDLIBLE.
@@ -31,10 +34,6 @@ dcl-ds dspInds qualified;
   refreshKey ind pos(5);
 end-ds;
 
-dcl-pr checkFlag ind;
-  flagName varchar(50) const;
-end-pr;
-
 dcl-s flagOn    ind;
 dcl-s basePrice packed(9 : 2) inz(249.99);
 
@@ -43,7 +42,9 @@ dcl-s basePrice packed(9 : 2) inz(249.99);
 // ---------------------------------------------------------------------
 dow *on;
 
-  flagOn = checkFlag('NEW_PRICING');
+  // The real public contract: one call, evaluated for the job user,
+  // honouring per-user overrides in FLAGUSR and the in-job cache.
+  flagOn = flag_isOn('NEW_PRICING');
 
   if flagOn;
     FLAGTXT = 'ON';
@@ -71,30 +72,3 @@ enddo;
 
 *inlr = *on;
 return;
-
-// ---------------------------------------------------------------------
-//  checkFlag  -  read one flag from FLAGDEF. Fails closed: any error,
-//                missing flag, or retired flag resolves to OFF.
-// ---------------------------------------------------------------------
-dcl-proc checkFlag;
-
-  dcl-pi *n ind;
-    flagName varchar(50) const;
-  end-pi;
-
-  dcl-s enabled char(1) inz('N');
-
-  exec sql
-    select enabled
-      into :enabled
-      from flagdef
-     where flag_name = :flagName
-       and status    = 'A';
-
-  if sqlcode <> 0;
-    enabled = 'N';
-  endif;
-
-  return (enabled = 'Y');
-
-end-proc;
