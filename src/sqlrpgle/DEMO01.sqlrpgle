@@ -68,6 +68,15 @@ dow *on;
     leave;
   endif;
 
+  // F5 = re-evaluate. FLAGSRV keeps an in-job cache and will serve a warm
+  // hit with no I/O until its TTL expires (default 60s), so without this
+  // call a flag flipped seconds ago would not be visible yet. This is the
+  // service program working as designed - flag_refresh() is exported for
+  // exactly this case.
+  if dspInds.refreshKey;
+    flag_refresh();
+  endif;
+
 enddo;
 
 *inlr = *on;
