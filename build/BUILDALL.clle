@@ -18,7 +18,10 @@
              DCL        VAR(&ROOT)   TYPE(*CHAR) LEN(256)
              DCL        VAR(&DATLIB) TYPE(*CHAR) LEN(10)
              DCL        VAR(&OBJLIB) TYPE(*CHAR) LEN(10)
-             DCL        VAR(&TSTLIB) TYPE(*CHAR) LEN(10) VALUE('*NONE')
+             DCL        VAR(&TSTLIB) TYPE(*CHAR) LEN(10)
+             DCL        VAR(&CMD)    TYPE(*CHAR) LEN(512)
+             DCL        VAR(&CMDLEN) TYPE(*DEC)  LEN(15 5) +
+                          VALUE(512)
 
              /* Resolve stream files relative to the repo root. */
              CHGCURDIR  DIR(&ROOT)
@@ -64,9 +67,15 @@
 
              /* --- RPGUnit test program (optional) ------------------- */
              IF         COND(&TSTLIB *NE '*NONE') THEN(DO)
-               RUCRTTST TSTPGM(&TSTLIB/FLAGSRVT) +
-                          SRCSTMF('test/FLAGSRVT.sqlrpgle') +
-                          BNDDIR(&OBJLIB/FLAGBND) COMMIT(*NONE)
+               /* Called via QCMDEXC so this program still compiles on  */
+               /* systems where RPGUnit (RUCRTTST) is not installed.    */
+               CHGVAR   VAR(&CMD) VALUE('RUCRTTST TSTPGM(' *CAT +
+                          &TSTLIB *TCAT '/FLAGSRVT) ' *CAT +
+                          'SRCSTMF(''test/FLAGSRVT.sqlrpgle'') ' *CAT +
+                          'BNDDIR(' *CAT &OBJLIB *TCAT '/FLAGBND) ' *CAT +
+                          'COMMIT(*NONE)')
+               CALL     PGM(QSYS/QCMDEXC) PARM(&CMD &CMDLEN)
+               MONMSG   MSGID(CPF0000)
              ENDDO
 
              SNDPGMMSG  MSG('Feature flag build complete.') +

@@ -66,7 +66,8 @@ src/
   ddl/02_procedures.sql       admin stored procedures
   README.md                   component build reference
 build/
-  BUILDALL.clle               one CL program that builds everything
+  BUILDALL.clle               one CL program that builds from IFS stream files
+  BUILDLIB.clle               one CL program that builds from INTGRTV source members
 test/
   FLAGSRVT.sqlrpgle           RPGUnit test suite
 docs/
@@ -133,6 +134,112 @@ ADDBNDDIRE BNDDIR(yourlib/FLAGBND) OBJ((yourlib/FLAGSRV *SRVPGM))
 > `FLAGDEF`/`FLAGUSR`/`FLAGCTL`. Because authority is adopted, SQL `CURRENT_USER`
 > would return the *owner* — so evaluation reads the **job user** (`SESSION_USER`)
 > instead. That is the identity `flag_isOn()` targets.
+
+### Option C — store source in library source files and build from there
+
+The default layout above keeps source as **IFS stream files** and builds with
+`SRCSTMF(...)`. If your shop prefers the traditional model — source as **members in
+source physical files** inside a library — use this path instead.
+
+#### Store the source as members
+
+IFS filenames don't all translate to valid member names (a member name can't start
+with a digit), so two files are renamed on the way in:
+
+| IFS source file | Target member | `SRCTYPE` |
+|---|---|---|
+| `src/sqlrpgle/FLAGSRV.sqlrpgle` | `QRPGLESRC(FLAGSRV)` | `SQLRPGLE` |
+| `src/copy/FLAGSRV_H.rpgleinc` | `QRPGLESRC(FLAGSRV_H)` | `RPGLE` |
+| `src/bnd/FLAGSRV.bnd` | `QSRVSRC(FLAGSRV)` | `BND` |
+| `src/ddl/01_tables.sql` | `QSQLSRC(FLAGTABLES)` | `SQL` |
+| `src/ddl/02_procedures.sql` | `QSQLSRC(FLAGPROCS)` | `SQL` |
+
+Create the source files and members once, then copy the stream files in. Use
+`CPYFRMSTMF` rather than a plain file copy — it converts the IFS text (UTF-8/ASCII)
+to the member's EBCDIC CCSID; a raw byte copy would corrupt the source.
+
+```cl
+/* 1. Source physical files (112-byte records is the common default) */
+CRTSRCPF FILE(INTGRTV/QRPGLESRC) RCDLEN(112) TEXT('RPG source')
+CRTSRCPF FILE(INTGRTV/QSQLSRC)   RCDLEN(112) TEXT('SQL source')
+CRTSRCPF FILE(INTGRTV/QSRVSRC)   RCDLEN(112) TEXT('Binder source')
+
+/* 2. Members, each with its source type */
+ADDPFM FILE(INTGRTV/QRPGLESRC) MBR(FLAGSRV)    SRCTYPE(SQLRPGLE)
+ADDPFM FILE(INTGRTV/QRPGLESRC) MBR(FLAGSRV_H)  SRCTYPE(RPGLE)
+ADDPFM FILE(INTGRTV/QSRVSRC)   MBR(FLAGSRV)    SRCTYPE(BND)
+ADDPFM FILE(INTGRTV/QSQLSRC)   MBR(FLAGTABLES) SRCTYPE(SQL)
+ADDPFM FILE(INTGRTV/QSQLSRC)   MBR(FLAGPROCS)  SRCTYPE(SQL)
+
+/* 3. Populate members from the IFS stream files (converts CCSID) */
+CPYFRMSTMF FROMSTMF('src/sqlrpgle/FLAGSRV.sqlrpgle')
+           TOMBR('/QSYS.LIB/INTGRTV.LIB/QRPGLESRC.FILE/FLAGSRV.MBR')
+           MBROPT(*REPLACE) STMFCCSID(*STMF) DBFCCSID(*FILE)
+CPYFRMSTMF FROMSTMF('src/copy/FLAGSRV_H.rpgleinc')
+           TOMBR('/QSYS.LIB/INTGRTV.LIB/QRPGLESRC.FILE/FLAGSRV_H.MBR')
+           MBROPT(*REPLACE) STMFCCSID(*STMF) DBFCCSID(*FILE)
+CPYFRMSTMF FROMSTMF('src/bnd/FLAGSRV.bnd')
+           TOMBR('/QSYS.LIB/INTGRTV.LIB/QSRVSRC.FILE/FLAGSRV.MBR')
+           MBROPT(*REPLACE) STMFCCSID(*STMF) DBFCCSID(*FILE)
+CPYFRMSTMF FROMSTMF('src/ddl/01_tables.sql')
+           TOMBR('/QSYS.LIB/INTGRTV.LIB/QSQLSRC.FILE/FLAGTABLES.MBR')
+           MBROPT(*REPLACE) STMFCCSID(*STMF) DBFCCSID(*FILE)
+CPYFRMSTMF FROMSTMF('src/ddl/02_procedures.sql')
+           TOMBR('/QSYS.LIB/INTGRTV.LIB/QSQLSRC.FILE/FLAGPROCS.MBR')
+           MBROPT(*REPLACE) STMFCCSID(*STMF) DBFCCSID(*FILE)
+```
+
+> **One source edit is required.** `FLAGSRV.sqlrpgle` includes the copybook by IFS
+> path — `/copy 'src/copy/FLAGSRV_H.rpgleinc'`. That directive only resolves against
+> the IFS, so in the `FLAGSRV` *member* change it to reference the member instead:
+> ```rpgle
+> /copy QRPGLESRC,FLAGSRV_H
+> ```
+> With `INTGRTV` on the job's library list the compiler finds `FLAGSRV_H` there.
+> (Keep the stream-file source as the canonical copy; this swap is only in the member
+> used for the library build.)
+
+#### Build from the members
+
+`build/BUILDLIB.clle` does all of this in one shot (the member-source counterpart to
+`BUILDALL`), assuming the source lives in `INTGRTV`:
+
+```cl
+CRTBNDCL PGM(INTGRTV/BUILDLIB) SRCSTMF('build/BUILDLIB.clle')
+
+/* CALL param: test lib for the RPGUnit program (*NONE to skip) */
+CALL INTGRTV/BUILDLIB ('*NONE')
+```
+
+It adds `INTGRTV` to `*LIBL`, runs the SQL members, journals the tables, builds the
+module + `*SRVPGM`, and creates the `FLAGBND` binding directory. The manual steps
+below are the same work broken out — same objects as Option B, but every step reads
+`SRCFILE`/`SRCMBR` instead of `SRCSTMF`.
+
+```cl
+/* 1. Data objects + admin procedures (run the SQL members) */
+RUNSQLSTM SRCFILE(INTGRTV/QSQLSRC) SRCMBR(FLAGTABLES) COMMIT(*NONE) DFTRDBCOL(INTGRTV)
+RUNSQLSTM SRCFILE(INTGRTV/QSQLSRC) SRCMBR(FLAGPROCS)  COMMIT(*NONE) DFTRDBCOL(INTGRTV)
+
+STRJRNPF FILE(INTGRTV/FLAGDEF INTGRTV/FLAGUSR) JRN(INTGRTV/QSQJRN) IMAGES(*BOTH)
+
+/* 2. Service program (ensure INTGRTV is on *LIBL so the /copy member resolves) */
+ADDLIBLE   LIB(INTGRTV)
+CRTSQLRPGI OBJ(INTGRTV/FLAGSRV) SRCFILE(INTGRTV/QRPGLESRC) SRCMBR(FLAGSRV)
+           OBJTYPE(*MODULE) DBGVIEW(*SOURCE) COMMIT(*NONE)
+CRTSRVPGM  SRVPGM(INTGRTV/FLAGSRV) MODULE(INTGRTV/FLAGSRV)
+           SRCFILE(INTGRTV/QSRVSRC) SRCMBR(FLAGSRV)
+           ACTGRP(FLAGS) USRPRF(*OWNER)
+
+/* 3. Binding directory for consumers */
+CRTBNDDIR  BNDDIR(INTGRTV/FLAGBND)
+ADDBNDDIRE BNDDIR(INTGRTV/FLAGBND) OBJ((INTGRTV/FLAGSRV *SRVPGM))
+```
+
+To build the RPGUnit test the same way, copy `test/FLAGSRVT.sqlrpgle` into a member
+(e.g. `QRPGLESRC(FLAGSRVT)`, type `SQLRPGLE`), apply the same `/copy QRPGLESRC,FLAGSRV_H`
+edit, and build with `RUCRTTST TSTPGM(INTGRTV/FLAGSRVT) SRCFILE(INTGRTV/QRPGLESRC)
+SRCMBR(FLAGSRVT) BNDDIR(INTGRTV/FLAGBND)`.
 
 ---
 

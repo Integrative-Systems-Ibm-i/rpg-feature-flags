@@ -1,0 +1,88 @@
+/* ===================================================================== */
+/*  BUILDLIB  -  Build the whole feature flag system from LIBRARY source  */
+/*              members (source physical files), not IFS stream files.    */
+/*              Everything is assumed to live in library INTGRTV:          */
+/*                INTGRTV/QRPGLESRC(FLAGSRV)     SRCTYPE SQLRPGLE          */
+/*                INTGRTV/QRPGLESRC(FLAGSRV_H)   SRCTYPE RPGLE             */
+/*                INTGRTV/QSRVSRC  (FLAGSRV)     SRCTYPE BND               */
+/*                INTGRTV/QSQLSRC  (FLAGTABLES)  SRCTYPE SQL               */
+/*                INTGRTV/QSQLSRC  (FLAGPROCS)   SRCTYPE SQL               */
+/*                                                                        */
+/*  REQUIREMENT: the FLAGSRV RPG member must include the copybook by      */
+/*  member, i.e.  /copy QRPGLESRC,FLAGSRV_H   (not the IFS /copy path).   */
+/*  INTGRTV is placed on *LIBL below so that /copy resolves.              */
+/*                                                                        */
+/*  Param:                                                                */
+/*    TSTLIB  Library for the RPGUnit test program (*NONE to skip).       */
+/*            Requires INTGRTV/QRPGLESRC(FLAGSRVT) to exist.              */
+/*                                                                        */
+/*  Compile this program once (from the IFS stream file):                */
+/*    CRTBNDCL PGM(INTGRTV/BUILDLIB) SRCSTMF('build/BUILDLIB.clle')       */
+/*  ...or from a member if you copied it into INTGRTV/QCLSRC(BUILDLIB):   */
+/*    CRTBNDCL PGM(INTGRTV/BUILDLIB) SRCFILE(INTGRTV/QCLSRC)             */
+/*  Then run:                                                            */
+/*    CALL INTGRTV/BUILDLIB ('*NONE')      /* or a test lib, e.g. FLGUT */
+/* ===================================================================== */
+             PGM        PARM(&TSTLIB)
+
+             DCL        VAR(&TSTLIB) TYPE(*CHAR) LEN(10)
+             DCL        VAR(&CMD)    TYPE(*CHAR) LEN(512)
+             DCL        VAR(&CMDLEN) TYPE(*DEC)  LEN(15 5) +
+                          VALUE(512)
+
+             /* Make sure INTGRTV is on the library list so the module's  */
+             /* /copy QRPGLESRC,FLAGSRV_H resolves, and unqualified DDL    */
+             /* object references land in INTGRTV.                         */
+             ADDLIBLE   LIB(INTGRTV)
+             MONMSG     MSGID(CPF2103)   /* already on the library list */
+
+             /* --- Data model + admin procedures (SQL members) ------- */
+             RUNSQLSTM  SRCFILE(INTGRTV/QSQLSRC) SRCMBR(FLAGTABLES) +
+                          COMMIT(*NONE) DFTRDBCOL(INTGRTV)
+             RUNSQLSTM  SRCFILE(INTGRTV/QSQLSRC) SRCMBR(FLAGPROCS) +
+                          COMMIT(*NONE) DFTRDBCOL(INTGRTV)
+
+             /* --- Journal the flag tables for audit (best effort) --- */
+             CRTJRNRCV  JRNRCV(INTGRTV/FLAGRCV0)
+             MONMSG     MSGID(CPF7010)
+             CRTJRN     JRN(INTGRTV/QSQJRN) JRNRCV(INTGRTV/FLAGRCV0)
+             MONMSG     MSGID(CPF7010)
+             STRJRNPF   FILE(INTGRTV/FLAGDEF INTGRTV/FLAGUSR) +
+                          JRN(INTGRTV/QSQJRN) IMAGES(*BOTH)
+             MONMSG     MSGID(CPF7030)
+
+             /* --- Service program: module -> *SRVPGM ---------------- */
+             DLTMOD     MODULE(INTGRTV/FLAGSRV)
+             MONMSG     MSGID(CPF2105)   /* not found - first build */
+             CRTSQLRPGI OBJ(INTGRTV/FLAGSRV) +
+                          SRCFILE(INTGRTV/QRPGLESRC) SRCMBR(FLAGSRV) +
+                          OBJTYPE(*MODULE) DBGVIEW(*SOURCE) COMMIT(*NONE)
+
+             DLTSRVPGM  SRVPGM(INTGRTV/FLAGSRV)
+             MONMSG     MSGID(CPF2105)   /* not found - first build */
+             CRTSRVPGM  SRVPGM(INTGRTV/FLAGSRV) MODULE(INTGRTV/FLAGSRV) +
+                          SRCFILE(INTGRTV/QSRVSRC) SRCMBR(FLAGSRV) +
+                          ACTGRP(FLAGS) USRPRF(*OWNER)
+
+             /* --- Binding directory for consumers ------------------- */
+             CRTBNDDIR  BNDDIR(INTGRTV/FLAGBND)
+             MONMSG     MSGID(CPF5D0C)   /* already exists */
+             ADDBNDDIRE BNDDIR(INTGRTV/FLAGBND) +
+                          OBJ((INTGRTV/FLAGSRV *SRVPGM))
+             MONMSG     MSGID(CPF980B)   /* entry already present */
+
+             /* --- RPGUnit test program (optional) ------------------- */
+             IF         COND(&TSTLIB *NE '*NONE') THEN(DO)
+               /* Called via QCMDEXC so this program still compiles on  */
+               /* systems where RPGUnit (RUCRTTST) is not installed.    */
+               CHGVAR   VAR(&CMD) VALUE('RUCRTTST TSTPGM(' *CAT +
+                          &TSTLIB *TCAT '/FLAGSRVT) ' *CAT +
+                          'SRCFILE(INTGRTV/QRPGLESRC) SRCMBR(FLAGSRVT) ' *CAT +
+                          'BNDDIR(INTGRTV/FLAGBND) COMMIT(*NONE)')
+               CALL     PGM(QSYS/QCMDEXC) PARM(&CMD &CMDLEN)
+               MONMSG   MSGID(CPF0000)
+             ENDDO
+
+             SNDPGMMSG  MSG('Feature flag build from INTGRTV source +
+                          members complete.') MSGTYPE(*COMP)
+             ENDPGM

@@ -21,9 +21,9 @@ CREATE TABLE flagdef (
   description VARCHAR(256) NOT NULL DEFAULT '',
   enabled     CHAR(1)      NOT NULL DEFAULT 'N',   -- 'Y' / 'N' global default
   status      CHAR(1)      NOT NULL DEFAULT 'A',   -- 'A' active / 'R' retired
-  created_by  VARCHAR(10)  NOT NULL DEFAULT USER,
+  created_by  VARCHAR(18)  NOT NULL DEFAULT USER,
   created_ts  TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  changed_by  VARCHAR(10)  NOT NULL DEFAULT USER,
+  changed_by  VARCHAR(18)  NOT NULL DEFAULT USER,
   changed_ts  TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (flag_name),
   CONSTRAINT flagdef_enabled CHECK (enabled IN ('Y','N')),
@@ -37,7 +37,7 @@ CREATE TABLE flagusr (
   flag_name    VARCHAR(50) NOT NULL,
   user_profile VARCHAR(10) NOT NULL,
   enabled      CHAR(1)     NOT NULL,             -- 'Y' / 'N' override
-  changed_by   VARCHAR(10) NOT NULL DEFAULT USER,
+  changed_by   VARCHAR(18) NOT NULL DEFAULT USER,
   changed_ts   TIMESTAMP   NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (flag_name, user_profile),
   CONSTRAINT flagusr_enabled CHECK (enabled IN ('Y','N')),
