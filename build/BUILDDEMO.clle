@@ -19,6 +19,46 @@
              MONMSG     MSGID(CPF2103)
              CHGCURDIR  DIR(&ROOT)
 
+             /* --- Data model: tables + admin procedures -------------- */
+             /* A branch build gets its own library, so that library has to  */
+             /* be self-contained: data model, service program, then demo.   */
+             CHGVAR     VAR(&STMF) VALUE(&ROOT *TCAT '/src/ddl/01_tables.sql')
+             RUNSQLSTM  SRCSTMF(&STMF) COMMIT(*NONE) DFTRDBCOL(&LIB)
+             MONMSG     MSGID(CPF0000)
+             CHGVAR     VAR(&STMF) VALUE(&ROOT *TCAT +
+                          '/src/ddl/02_procedures.sql')
+             RUNSQLSTM  SRCSTMF(&STMF) COMMIT(*NONE) DFTRDBCOL(&LIB)
+             MONMSG     MSGID(CPF0000)
+
+             /* --- Journaling: the procedures need it, despite looking  --- */
+             /* --- optional. Without it writes fail with SQL7008.       --- */
+             CRTJRNRCV  JRNRCV(&LIB/FLAGRCV0)
+             MONMSG     MSGID(CPF0000)
+             CRTJRN     JRN(&LIB/QSQJRN) JRNRCV(&LIB/FLAGRCV0)
+             MONMSG     MSGID(CPF0000)
+             STRJRNPF   FILE(&LIB/FLAGDEF &LIB/FLAGUSR) JRN(&LIB/QSQJRN) +
+                          IMAGES(*BOTH)
+             MONMSG     MSGID(CPF0000)
+
+             /* --- Service program: FLAGSRV ---------------------------- */
+             DLTMOD     MODULE(&LIB/FLAGSRV)
+             MONMSG     MSGID(CPF2105)
+             CHGVAR     VAR(&STMF) VALUE(&ROOT *TCAT +
+                          '/src/sqlrpgle/FLAGSRV.sqlrpgle')
+             CRTSQLRPGI OBJ(&LIB/FLAGSRV) SRCSTMF(&STMF) OBJTYPE(*MODULE) +
+                          COMMIT(*NONE) CVTCCSID(*JOB) DBGVIEW(*SOURCE)
+
+             DLTSRVPGM  SRVPGM(&LIB/FLAGSRV)
+             MONMSG     MSGID(CPF2105)
+             CHGVAR     VAR(&STMF) VALUE(&ROOT *TCAT '/src/bnd/FLAGSRV.bnd')
+             CRTSRVPGM  SRVPGM(&LIB/FLAGSRV) MODULE(&LIB/FLAGSRV) +
+                          SRCSTMF(&STMF) ACTGRP(FLAGS) USRPRF(*OWNER)
+
+             CRTBNDDIR  BNDDIR(&LIB/FLAGBND)
+             MONMSG     MSGID(CPF0000)
+             ADDBNDDIRE BNDDIR(&LIB/FLAGBND) OBJ((&LIB/FLAGSRV *SRVPGM))
+             MONMSG     MSGID(CPF0000)
+
              /* --- DDS source file (DDS cannot compile from the IFS) -- */
              CRTSRCPF   FILE(&LIB/QDDSSRC) RCDLEN(112) TEXT('DDS source')
              MONMSG     MSGID(CPF0000)
@@ -57,5 +97,5 @@
              CRTSQLRPGI OBJ(&LIB/DEMO01) SRCSTMF(&STMF) OBJTYPE(*PGM) +
                           COMMIT(*NONE) CVTCCSID(*JOB) DBGVIEW(*SOURCE)
 
-             SNDPGMMSG  MSG('DEMO01 build complete.') MSGTYPE(*COMP)
+             SNDPGMMSG  MSG('Feature flags + DEMO01 build complete.') MSGTYPE(*COMP)
              ENDPGM

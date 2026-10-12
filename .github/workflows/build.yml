@@ -2,7 +2,8 @@ name: Build on IBM i
 
 # The runner is self-hosted and lives INSIDE your network. GitHub never reaches
 # the IBM i; the runner polls GitHub outbound, then connects to the box locally.
-# The SSH key stays on the runner, so no IBM i credential is stored in GitHub.
+# The SSH key is read off the runner's disk at run time, so no IBM i credential
+# is ever stored in GitHub.
 
 on:
   push:
@@ -17,13 +18,15 @@ jobs:
     env:
       IBMI_HOST: ${{ vars.IBMI_HOST }}
       IBMI_USER: ${{ vars.IBMI_USER }}
-      # NOTE: must be an absolute path. A quoted variable holding "~"
-      # is not tilde-expanded by the shell, so $HOME is resolved per step.
+      IBMI_SSH_PORT: 22
       SSH_KEY_NAME: ibmi_demo
 
     steps:
       - name: Check out the source
         uses: actions/checkout@v4
+
+      - name: Install ibmi-ci
+        run: npm install -g @ibm/ibmi-ci
 
       - name: Decide the target library and remote path
         id: target
@@ -36,77 +39,43 @@ jobs:
             LIB=$(printf 'FLG%s' "${GITHUB_REF_NAME}" | tr -cd '[:alnum:]' \
                   | cut -c1-10 | tr '[:lower:]' '[:upper:]')
           fi
-          REMOTE="/home/${IBMI_USER}/ci/${GITHUB_RUN_ID}"
-          echo "lib=$LIB"       >> "$GITHUB_OUTPUT"
-          echo "remote=$REMOTE" >> "$GITHUB_OUTPUT"
-          echo "Building into library $LIB from $REMOTE"
+          echo "lib=$LIB" >> "$GITHUB_OUTPUT"
+          echo "remote=./ci/${GITHUB_RUN_ID}" >> "$GITHUB_OUTPUT"
+          echo "Building into library $LIB"
 
-      - name: Copy the source to the IBM i
+      - name: Build on the IBM i
         run: |
+          LIB='${{ steps.target.outputs.lib }}'
           REMOTE='${{ steps.target.outputs.remote }}'
+          ABS="/home/$IBMI_USER/${REMOTE#./}"
+
+          # The key is read from the runner's own disk. It is never stored in
+          # GitHub, and IBMI_PRIVATE_KEY wants the key CONTENTS, not a path.
           KEY="$HOME/.ssh/$SSH_KEY_NAME"
-          echo "runner user : $(whoami)"
-          echo "key path    : $KEY"
           test -f "$KEY" || { echo "::error::SSH key not found at $KEY"; exit 1; }
-          ssh -i "$KEY" -o BatchMode=yes -o StrictHostKeyChecking=no \
-              -o IdentitiesOnly=yes -o ConnectTimeout=10 \
-              "$IBMI_USER@$IBMI_HOST" "echo SSH-OK" \
-            || { echo "::error::SSH to $IBMI_USER@$IBMI_HOST failed"; exit 1; }
-          # COPYFILE_DISABLE keeps macOS from shipping ._AppleDouble files.
-          # PASE tar is AIX tar: no -z, so send it uncompressed.
-          COPYFILE_DISABLE=1 tar cf - \
-            --exclude='.git' --exclude='.env' --exclude='.DS_Store' . \
-          | ssh -i "$HOME/.ssh/$SSH_KEY_NAME" -o BatchMode=yes -o StrictHostKeyChecking=no \
-                -o IdentitiesOnly=yes "$IBMI_USER@$IBMI_HOST" \
-                "rm -rf $REMOTE && mkdir -p $REMOTE && cd $REMOTE && tar xf -"
+          export IBMI_PRIVATE_KEY="$(cat "$KEY")"
 
-      - name: Compile the build program
-        run: |
-          REMOTE='${{ steps.target.outputs.remote }}'
-          LIB='${{ steps.target.outputs.lib }}'
-          ssh -i "$HOME/.ssh/$SSH_KEY_NAME" -o BatchMode=yes -o StrictHostKeyChecking=no \
-              -o IdentitiesOnly=yes "$IBMI_USER@$IBMI_HOST" \
-              "system \"CRTLIB LIB($LIB) TEXT('CI build')\" >/dev/null 2>&1;
-               system \"CRTBNDCL PGM($LIB/BUILDDEMO) SRCSTMF('$REMOTE/build/BUILDDEMO.clle')\""
-
-      - name: Build
-        run: |
-          REMOTE='${{ steps.target.outputs.remote }}'
-          LIB='${{ steps.target.outputs.lib }}'
-          # BUILDDEMO's ROOT parameter is CHAR(256); a short literal would leave
-          # the program reading past the end of the value, so pad it.
-          ROOT_PADDED=$(printf '%-256s' "$REMOTE")
+          # BUILDDEMO's ROOT parameter is CHAR(256) and LIB is CHAR(10).
+          # A short literal would leave the program reading past the value.
+          ROOT_PADDED=$(printf '%-256s' "$ABS")
           LIB_PADDED=$(printf '%-10s' "$LIB")
-          ssh -i "$HOME/.ssh/$SSH_KEY_NAME" -o BatchMode=yes -o StrictHostKeyChecking=no \
-              -o IdentitiesOnly=yes "$IBMI_USER@$IBMI_HOST" \
-              "system \"CALL PGM($LIB/BUILDDEMO) PARM('$ROOT_PADDED' '$LIB_PADDED')\"" \
-            | tee build.log
-          # The CL signals failure by escaping, which surfaces as CEE9901.
-          if grep -qE 'CEE9901|RNS931|not created' build.log; then
-            echo "::error::Build failed on the IBM i — see the log above"
-            exit 1
-          fi
 
-      - name: Verify the objects are the ones we just built
-        run: |
-          LIB='${{ steps.target.outputs.lib }}'
-          # One system call: QTEMP is per-job, and every PASE `system` invocation
-          # gets its own job, so anything staged in QTEMP would already be gone.
-          ssh -i "$HOME/.ssh/$SSH_KEY_NAME" -o BatchMode=yes \
-              -o StrictHostKeyChecking=no -o IdentitiesOnly=yes \
-              "$IBMI_USER@$IBMI_HOST" \
-              "system 'DSPOBJD OBJ($LIB/DEMO01*) OBJTYPE(*ALL)'" \
-            | grep -E 'DEMO01' | tee objects.txt
-          if ! grep -q 'DEMO01 ' objects.txt; then
-            echo "::error::DEMO01 program not found in $LIB after the build"
-            exit 1
-          fi
-          echo "::notice::Built DEMO01 and DEMO01D into $LIB"
+          # One connection, five steps. --push skips .git and dotfiles for us.
+          # --cl runs CL directly, so there is no system "..." quoting to fight.
+          # Note: each --cl still gets its own job, so the library list does NOT
+          # carry between them. That is why the real build lives in BUILDDEMO,
+          # which does its own ADDLIBLE and runs everything in one job.
+          ici \
+            --rcwd "$REMOTE" \
+            --push "." \
+            --ignore --cl "CRTLIB LIB($LIB) TEXT('CI build')" \
+            --cl "CRTBNDCL PGM($LIB/BUILDDEMO) SRCSTMF('$ABS/build/BUILDDEMO.clle')" \
+            --cl "CALL PGM($LIB/BUILDDEMO) PARM('$ROOT_PADDED' '$LIB_PADDED')" \
+            --cl "DSPOBJD OBJ($LIB/DEMO01) OBJTYPE(*PGM)"
 
       - name: Clean up the staged source
         if: always()
         run: |
           REMOTE='${{ steps.target.outputs.remote }}'
-          ssh -i "$HOME/.ssh/$SSH_KEY_NAME" -o BatchMode=yes -o StrictHostKeyChecking=no \
-              -o IdentitiesOnly=yes "$IBMI_USER@$IBMI_HOST" \
-              "rm -rf $REMOTE" || true
+          export IBMI_PRIVATE_KEY="$(cat "$HOME/.ssh/$SSH_KEY_NAME")"
+          ici --cmd "rm -rf $REMOTE" || true

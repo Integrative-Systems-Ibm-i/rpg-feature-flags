@@ -78,7 +78,31 @@ cd ~/actions-runner && ./svc.sh install && ./svc.sh start   # background service
 | Verify | lists the objects with their creation timestamps |
 | Clean up | removes the staged source, always |
 
-## 5. Things that will bite you
+## 5. Why ibmi-ci, and what it does not solve
+
+The workflow uses [`ibmi-ci`](https://github.com/IBM/ibmi-ci) (`ici`) instead of
+hand-rolled `ssh` and `tar`. What that buys:
+
+- **`--push` is selective.** It skips `.git`, `.env`, and dotfiles on its own, so the
+  `COPYFILE_DISABLE` and AIX-tar problems disappear.
+- **`--cl` runs CL directly** — no `system "..."` wrapper, so no nested quoting.
+- **`--ignore`** marks a step as allowed-to-fail, replacing `>/dev/null 2>&1`.
+- **One connection** for the whole build instead of five separate `ssh` calls.
+
+**What it does NOT solve:** each `--cl` still gets its own job, so a library list set
+in one does not carry to the next. Verified directly — `ADDLIBLE` then `DSPOBJD` on an
+unqualified name fails with CPF2105. That is why the real build still lives in
+`BUILDDEMO.clle`, which does its own `ADDLIBLE` and runs everything in one job.
+
+**Credentials:** `IBMI_PRIVATE_KEY` wants the key *contents*, not a path. The workflow
+reads it off the runner's disk at run time (`$(cat ~/.ssh/ibmi_demo)`), so the key is
+never stored in GitHub. Do not follow the upstream example that puts `IBMI_PASSWORD`
+in repository secrets — it works, but it throws away the best property of this setup.
+
+**Status:** `ibmi-ci` is not archived but has had no commits since September 2025.
+Plain `ssh` remains a perfectly good fallback.
+
+## 6. Things that will bite you
 
 - **PASE `system` gives every call its own library list.** `ADDLIBLE` in one command
   does not apply to the next. Anything needing a library list has to run inside a
@@ -93,3 +117,8 @@ cd ~/actions-runner && ./svc.sh install && ./svc.sh start   # background service
   build. That is usually what "it compiled on my machine" means.
 - **CL `CHAR(256)` parameters must be padded** by the caller; a short literal leaves
   the program reading past the end of the value.
+- **A branch library must be self-contained.** `BUILDDEMO` builds the data model, the
+  journal, the service program *and* the demo, because a branch gets an empty library
+  and `DEMO01` cannot bind to a `FLAGSRV` that is not there.
+- **You cannot rebuild while the demo is on screen.** `DEMO01` holds a lock on the
+  display file; press F3 first. The build now says so in plain words.
