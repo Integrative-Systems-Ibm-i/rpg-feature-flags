@@ -66,8 +66,10 @@ end-ds;
 // ---------------------------------------------------------------------
 //  Internal prototypes
 // ---------------------------------------------------------------------
-dcl-pr ensureFresh    ind;                 end-pr;
-dcl-pr loadCache      ind;                 end-pr;
+dcl-pr ensureFresh    ind;
+end-pr;
+dcl-pr loadCache      ind;
+end-pr;
 dcl-pr readVersion    ind;
   ver timestamp;
 end-pr;

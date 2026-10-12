@@ -1,0 +1,48 @@
+/* ===================================================================== */
+/*  BUILDDEMO  -  Build the DEMO01 feature-flag demo (screen + program). */
+/*                                                                       */
+/*  Everything runs in ONE job so the library list set here is still in  */
+/*  effect for the compiles. That is why this is a CL program and not a  */
+/*  shell script: each PASE `system` call gets its own library list.     */
+/*                                                                       */
+/*    CRTBNDCL PGM(FLGDEV/BUILDDEMO) SRCSTMF('build/BUILDDEMO.clle')     */
+/*    CALL FLGDEV/BUILDDEMO ('/home/STEPHR/rpg-ff' 'FLGDEV')             */
+/* ===================================================================== */
+             PGM        PARM(&ROOT &LIB)
+
+             DCL        VAR(&ROOT) TYPE(*CHAR) LEN(256)
+             DCL        VAR(&LIB)  TYPE(*CHAR) LEN(10)
+             DCL        VAR(&STMF) TYPE(*CHAR) LEN(300)
+             DCL        VAR(&MBR)  TYPE(*CHAR) LEN(100)
+
+             ADDLIBLE   LIB(&LIB)
+             MONMSG     MSGID(CPF2103)
+             CHGCURDIR  DIR(&ROOT)
+
+             /* --- DDS source file (DDS cannot compile from the IFS) -- */
+             CRTSRCPF   FILE(&LIB/QDDSSRC) RCDLEN(112) TEXT('DDS source')
+             MONMSG     MSGID(CPF0000)
+             ADDPFM     FILE(&LIB/QDDSSRC) MBR(DEMO01D) SRCTYPE(DSPF)
+             MONMSG     MSGID(CPF0000)
+
+             CHGVAR     VAR(&STMF) VALUE(&ROOT *TCAT '/src/dspf/DEMO01D.dspf')
+             CHGVAR     VAR(&MBR)  VALUE('/QSYS.LIB/' *CAT &LIB *TCAT +
+                          '.LIB/QDDSSRC.FILE/DEMO01D.MBR')
+             CPYFRMSTMF FROMSTMF(&STMF) TOMBR(&MBR) MBROPT(*REPLACE) +
+                          STMFCCSID(1208) DBFCCSID(37)
+
+             DLTF       FILE(&LIB/DEMO01D)
+             MONMSG     MSGID(CPF2105)
+             CRTDSPF    FILE(&LIB/DEMO01D) SRCFILE(&LIB/QDDSSRC) +
+                          SRCMBR(DEMO01D)
+
+             /* --- the program (compiles from the IFS directly) ------- */
+             DLTPGM     PGM(&LIB/DEMO01)
+             MONMSG     MSGID(CPF2105)
+             CHGVAR     VAR(&STMF) VALUE(&ROOT *TCAT +
+                          '/src/sqlrpgle/DEMO01.sqlrpgle')
+             CRTSQLRPGI OBJ(&LIB/DEMO01) SRCSTMF(&STMF) OBJTYPE(*PGM) +
+                          COMMIT(*NONE) CVTCCSID(*JOB) DBGVIEW(*SOURCE)
+
+             SNDPGMMSG  MSG('DEMO01 build complete.') MSGTYPE(*COMP)
+             ENDPGM

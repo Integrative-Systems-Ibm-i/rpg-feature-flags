@@ -35,4 +35,4 @@ end-pr;
 dcl-pr flag_cachedCount int(10) extproc(*dclcase);
 end-pr;
 
-/end-if
+/endif

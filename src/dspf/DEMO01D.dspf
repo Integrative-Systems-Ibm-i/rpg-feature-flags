@@ -1,0 +1,22 @@
+     A                                      INDARA
+     A                                      DSPSIZ(24 80 *DS3)
+     A                                      CA03(03 'Exit')
+     A                                      CA05(05 'Refresh')
+     A          R DEMOFMT
+     A                                  1  2'Feature Flag Demo'
+     A                                  1 52'Integrative Systems'
+     A                                  2  2'=============================='
+     A                                  4  2'Flag NEW_PRICING  . :'
+     A            FLAGTXT       10A  O  4 26
+     A                                  6  2'Pricing mode  . . . :'
+     A            MODETXT       30A  O  6 26
+     A                                  8  2'List price  . . . . :'
+     A            LISTPRC        9Y 2O  8 26EDTCDE(J)
+     A                                 10  2'You pay . . . . . . :'
+     A            PAYPRC         9Y 2O 10 26EDTCDE(J)
+     A                                 12  2'Message . . . . . . :'
+     A            MSGTXT        40A  O 12 26
+     A                                 15  2'Evaluated at  . . . :'
+     A            EVALTS        26A  O 15 26
+     A                                 22  2'F3=Exit   F5=Re-evaluate'
+     A                                 23  2'Flip the flag elsewhere, press F5'
