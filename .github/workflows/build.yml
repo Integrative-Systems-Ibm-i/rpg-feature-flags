@@ -33,12 +33,20 @@ jobs:
         run: |
           # main builds into FLGDEV; every other branch gets its own library,
           # so two branches never fight over one set of objects.
-          if [ "${GITHUB_REF_NAME}" = "main" ]; then
+          #
+          # On a pull_request event GITHUB_REF_NAME is the MERGE REF ("1/merge"),
+          # not the branch - which would name the library FLG1MERGE and collide
+          # across unrelated PRs. GITHUB_HEAD_REF holds the real source branch on
+          # a PR and is empty otherwise, so prefer it when it is set.
+          BRANCH="${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}"
+          if [ "$BRANCH" = "main" ]; then
             LIB=FLGDEV
           else
-            LIB=$(printf 'FLG%s' "${GITHUB_REF_NAME}" | tr -cd '[:alnum:]' \
+            LIB=$(printf 'FLG%s' "$BRANCH" | tr -cd '[:alnum:]' \
                   | cut -c1-10 | tr '[:lower:]' '[:upper:]')
           fi
+          echo "branch=$BRANCH"
+
           echo "lib=$LIB" >> "$GITHUB_OUTPUT"
           echo "remote=./ci/${GITHUB_RUN_ID}" >> "$GITHUB_OUTPUT"
           echo "Building into library $LIB"
