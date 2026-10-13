@@ -63,23 +63,21 @@ jobs:
           test -f "$KEY" || { echo "::error::SSH key not found at $KEY"; exit 1; }
           export IBMI_PRIVATE_KEY="$(cat "$KEY")"
 
-          # BUILDDEMO's ROOT parameter is CHAR(256) and LIB is CHAR(10).
-          # A short literal would leave the program reading past the value.
-          ROOT_PADDED=$(printf '%-256s' "$ABS")
-          LIB_PADDED=$(printf '%-10s' "$LIB")
-
-          # One connection, five steps. --push skips .git and dotfiles for us.
-          # --cl runs CL directly, so there is no system "..." quoting to fight.
-          # Note: each --cl still gets its own job, so the library list does NOT
-          # carry between them. That is why the real build lives in BUILDDEMO,
-          # which does its own ADDLIBLE and runs everything in one job.
+          # TOBi owns the compiled objects. The data model does not fit its
+          # one-target-per-object model (01_tables.sql creates three tables, two
+          # triggers and a view in one file), so the DDL and journaling stay as
+          # CL steps here. That split is deliberate, not a workaround.
           ici \
             --rcwd "$REMOTE" \
             --push "." \
             --ignore --cl "CRTLIB LIB($LIB) TEXT('CI build')" \
-            --cl "CRTBNDCL PGM($LIB/BUILDDEMO) SRCSTMF('$ABS/build/BUILDDEMO.clle')" \
-            --cl "CALL PGM($LIB/BUILDDEMO) PARM('$ROOT_PADDED' '$LIB_PADDED')" \
-            --cl "DSPOBJD OBJ($LIB/DEMO01) OBJTYPE(*PGM)"
+            --cl "RUNSQLSTM SRCSTMF('$ABS/src/ddl/01_tables.sql') COMMIT(*NONE) DFTRDBCOL($LIB)" \
+            --cl "RUNSQLSTM SRCSTMF('$ABS/src/ddl/02_procedures.sql') COMMIT(*NONE) DFTRDBCOL($LIB)" \
+            --ignore --cl "CRTJRNRCV JRNRCV($LIB/FLAGRCV0)" \
+            --ignore --cl "CRTJRN JRN($LIB/QSQJRN) JRNRCV($LIB/FLAGRCV0)" \
+            --ignore --cl "STRJRNPF FILE($LIB/FLAGDEF $LIB/FLAGUSR) JRN($LIB/QSQJRN) IMAGES(*BOTH)" \
+            --ignore --cl "CRTBNDDIR BNDDIR($LIB/FLAGBND)" \
+            --cmd "export PATH=/QOpenSys/pkgs/bin:\$PATH && cd $ABS && OBJLIB=$LIB makei build"
 
       - name: Clean up the staged source
         if: always()
