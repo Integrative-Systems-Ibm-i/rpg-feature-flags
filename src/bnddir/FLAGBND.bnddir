@@ -1,0 +1,10 @@
+/* Pseudo-source: TOBi runs these CL commands to create the object.       */
+/* &O = target object library, &N = FLAGBND.                              */
+/*                                                                        */
+/* CRTBNDDIR has no REPLACE, so a rebuild must delete first. That makes   */
+/* the FIRST build fail unless the object already exists - which is why   */
+/* the pipeline runs an ignored CRTBNDDIR before makei. Belt and braces,  */
+/* but it keeps this recipe idempotent.                                   */
+DLTBNDDIR  BNDDIR(&O/&N)
+CRTBNDDIR  BNDDIR(&O/&N) TEXT('Feature flag service program')
+ADDBNDDIRE BNDDIR(&O/&N) OBJ((&O/FLAGSRV *SRVPGM))

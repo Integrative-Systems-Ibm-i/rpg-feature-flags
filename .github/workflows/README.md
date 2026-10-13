@@ -102,7 +102,92 @@ in repository secrets — it works, but it throws away the best property of this
 **Status:** `ibmi-ci` is not archived but has had no commits since September 2025.
 Plain `ssh` remains a perfectly good fallback.
 
-## 6. Things that will bite you
+## 6. TOBi — what it does and does not buy you
+
+The build uses [TOBi](https://github.com/IBM/ibmi-tobi) (`makei build`) rather than a
+list of explicit compile commands. Install it with `yum install tobi`.
+
+**The project metadata:**
+
+- `iproj.json` at the root — object library, include path, build command. `objlib` is
+  `&OBJLIB`, so the pipeline sets `OBJLIB=<branch library>` and the same files build
+  into any library.
+- `Rules.mk` per source directory, declaring each object and what it depends on.
+
+**The dependency graph is the point.** `DEMO01.PGM` depends on `FLAGBND.BNDDIR` and
+`DEMO01D.FILE`, so touching the binder source rebuilds the service program, the binding
+directory *and* the demo program — verified, not assumed. Touching only the DDS rebuilds
+the display file and the program, and nothing else.
+
+**It solves the DDS problem for free.** `CRTDSPF` cannot read IFS source, and TOBi ships
+`crtfrmstmf` to stage it into a source member automatically. The hand-written staging
+this repo used to carry is gone.
+
+### ⚠ Incremental builds do not help in CI, and here is why
+
+`ici --push` re-uploads every file, which refreshes every mtime, so `make` sees the whole
+project as changed. Measured on this repo:
+
+| | Objects rebuilt |
+|---|---|
+| `makei build` with no `--push` and no changes | **0** — "All targets up-to-date" |
+| `makei build` after `--push`, no source changes | **5** — everything |
+
+So in a pipeline that uploads a fresh copy each run, TOBi performs a full build every
+time. That is arguably correct for CI — a clean, reproducible build — but do not expect
+a speed-up there.
+
+**Where TOBi's incremental build does pay off:** a developer building in place over SSH
+or from VS Code, where the source directory persists between builds. On five objects the
+difference is seconds; on a real application it is the difference between a build people
+wait for and one they avoid.
+
+### The two things that needed care
+
+- **The DDL does not fit TOBi's model.** `01_tables.sql` creates three tables, two
+  triggers and a view in one file, and TOBi wants one target per object. The DDL and
+  journaling stay as `--cl` steps in the workflow. That split is deliberate: TOBi owns
+  the compiled objects, CL owns the library scaffolding.
+- **`CRTBNDDIR` has no `REPLACE`.** The binding directory is built from TOBi
+  *pseudo-source* (`src/bnddir/FLAGBND.bnddir` — plain CL with `&O` and `&N`
+  substitutions), which deletes before creating. A failing command aborts the recipe,
+  so the first build would fail with nothing to delete; the workflow runs an
+  `--ignore --cl "CRTBNDDIR ..."` beforehand to guarantee it exists.
+
+### Branch library names: strip the prefix first
+
+`feature/tobi` and `feature/ibmi-ci` both truncate to `FLGFEATURE` if you build the
+name from the whole branch — `FLG` plus the first seven characters of `feature...`. The
+second PR then builds into the first one's library and fails on `SQL0601`, because the
+tables already exist.
+
+The workflow uses the **leaf** of the branch name (`${BRANCH##*/}`):
+
+| Branch | Library |
+|---|---|
+| `main` | `FLGDEV` |
+| `feature/tobi` | `FLGTOBI` |
+| `feature/ibmi-ci` | `FLGIBMICI` |
+| `fix/demo-screen` | `FLGDEMOSCR` |
+
+Two branches with the *same leaf* (`feature/tobi` and `fix/tobi`) would still collide.
+Acceptable here; add a short hash if it ever matters.
+
+### Branch libraries are dropped before each build
+
+`CREATE TABLE` is not idempotent, so re-running the DDL into a library that already has
+the tables fails. Rather than hide that, a branch build **drops its library first** and
+builds the whole stack from nothing — which also proves the build actually works from a
+clean slate. `main` is never dropped; it holds real flag data, and its DDL steps are
+`--ignore` because the tables existing there is expected, not a fault.
+
+### `SUBDIRS` must name immediate children
+
+A root `Rules.mk` with `SUBDIRS = src/dspf src/sqlrpgle` fails with
+`KeyError: PosixPath('src')`. TOBi walks one level at a time, so the root names `src`
+and `src/Rules.mk` names the directories below it.
+
+## 7. Things that will bite you
 
 - **PASE `system` gives every call its own library list.** `ADDLIBLE` in one command
   does not apply to the next. Anything needing a library list has to run inside a

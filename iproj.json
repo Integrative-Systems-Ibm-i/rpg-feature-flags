@@ -1,0 +1,15 @@
+{
+  "version": "0.0.1",
+  "description": "RPG Feature Flags",
+  "objlib": "&OBJLIB",
+  "curlib": "&OBJLIB",
+  "includePath": ["src/copy"],
+  "preUsrlibl": [],
+  "postUsrlibl": [],
+  "setIBMiEnvCmd": [],
+  "tgtccsid": "*JOB",
+  "buildCommand": "makei build",
+  "compileCommand": "makei compile -f {filename}",
+  "repository": "https://github.com/Integrative-Systems-Ibm-i/rpg-feature-flags",
+  "license": "MIT"
+}
