@@ -76,6 +76,7 @@ cd ~/actions-runner && ./svc.sh install && ./svc.sh start   # background service
 | Compile build program | `CRTBNDCL` on `BUILDDEMO` |
 | Build | `CALL BUILDDEMO` — display file and program |
 | Verify | lists the objects with their creation timestamps |
+| Run the unit tests | `CALL RUNTESTS` — compiles `FLAGSRVT` and runs it under RPGUnit. A failing assertion fails the step, so the merge is blocked |
 | Clean up | removes the staged source, always |
 
 ## 5. Why ibmi-ci, and what it does not solve
@@ -122,3 +123,18 @@ Plain `ssh` remains a perfectly good fallback.
   and `DEMO01` cannot bind to a `FLAGSRV` that is not there.
 - **You cannot rebuild while the demo is on screen.** `DEMO01` holds a lock on the
   display file; press F3 first. The build now says so in plain words.
+- **`RUCRTTST` will not read a UTF-8 source file.** It forwards the source's CCSID
+  straight into `CVTCCSID`, so a UTF-8 file yields `CVTCCSID(1208)` and the compiler
+  rejects it (SQL8031). There is no override parameter, so the pipeline converts the
+  test source to CCSID 37 first.
+- **Do that conversion in PASE, never in `QSH`.** QSH applies CCSID conversion on a
+  `>` redirect, so it turns the EBCDIC bytes `iconv` just produced back into UTF-8 —
+  the output ends up byte-identical to the source, `setccsid` then mislabels it, and
+  the compiler reads garbage (`RNF0257`/`RNF7023`). It fails *silently*, which is the
+  bad part. PASE does no such conversion.
+- **Staging the test into a source member is not a way around that.** The test
+  `/copy`s an IFS path, which cannot resolve from a member (`CPF4102`).
+- **`RUCRTTST`/`RUCALLTST` cannot be written directly in CL** unless `RPGUNIT` is on
+  the library list at *compile* time — the CL compiler resolves command names then,
+  and fails with `CPD0030` at severity 30. `RUNTESTS` calls both through `QCMDEXC`,
+  which defers the lookup to run time, after its own `ADDLIBLE`.

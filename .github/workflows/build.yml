@@ -81,6 +81,40 @@ jobs:
             --cl "CALL PGM($LIB/BUILDDEMO) PARM('$ROOT_PADDED' '$LIB_PADDED')" \
             --cl "DSPOBJD OBJ($LIB/DEMO01) OBJTYPE(*PGM)"
 
+      - name: Run the unit tests
+        run: |
+          LIB='${{ steps.target.outputs.lib }}'
+          REMOTE='${{ steps.target.outputs.remote }}'
+          ABS="/home/$IBMI_USER/${REMOTE#./}"
+          export IBMI_PRIVATE_KEY="$(cat "$HOME/.ssh/$SSH_KEY_NAME")"
+
+          ROOT_PADDED=$(printf '%-256s' "$ABS")
+          LIB_PADDED=$(printf '%-10s' "$LIB")
+
+          # The source is already on the box from the build step, so no --push.
+          #
+          # The iconv runs as a PASE command, deliberately NOT inside the CL.
+          # RUCRTTST forwards the source file's CCSID into CVTCCSID, and a UTF-8
+          # file yields CVTCCSID(1208), which the compiler rejects (SQL8031) with
+          # no override available - so the source has to be EBCDIC first. Doing
+          # that conversion with QSH does not work: QSH converts on a ">"
+          # redirect and turns the EBCDIC bytes straight back into UTF-8, leaving
+          # a file that setccsid then mislabels. PASE does no such conversion.
+          #
+          # RUNTESTS then does ADDLIBLE + RUCRTTST + RUCALLTST in ONE job,
+          # because each --cl step gets its own library list.
+          #
+          # A failing assertion makes RUCALLTST send an escape message, which
+          # fails RUNTESTS, which fails this step and blocks the merge.
+          ici \
+            --rcwd "$REMOTE" \
+            --cmd "rm -rf .build && mkdir -p .build \
+                   && iconv -f UTF-8 -t IBM-037 test/FLAGSRVT.sqlrpgle \
+                      > .build/FLAGSRVT.sqlrpgle \
+                   && setccsid 37 .build/FLAGSRVT.sqlrpgle" \
+            --cl "CRTBNDCL PGM($LIB/RUNTESTS) SRCSTMF('$ABS/build/RUNTESTS.clle')" \
+            --cl "CALL PGM($LIB/RUNTESTS) PARM('$ROOT_PADDED' '$LIB_PADDED')"
+
       - name: Clean up the staged source
         if: always()
         run: |
