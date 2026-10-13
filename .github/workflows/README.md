@@ -154,6 +154,33 @@ wait for and one they avoid.
   so the first build would fail with nothing to delete; the workflow runs an
   `--ignore --cl "CRTBNDDIR ..."` beforehand to guarantee it exists.
 
+### Branch library names: strip the prefix first
+
+`feature/tobi` and `feature/ibmi-ci` both truncate to `FLGFEATURE` if you build the
+name from the whole branch — `FLG` plus the first seven characters of `feature...`. The
+second PR then builds into the first one's library and fails on `SQL0601`, because the
+tables already exist.
+
+The workflow uses the **leaf** of the branch name (`${BRANCH##*/}`):
+
+| Branch | Library |
+|---|---|
+| `main` | `FLGDEV` |
+| `feature/tobi` | `FLGTOBI` |
+| `feature/ibmi-ci` | `FLGIBMICI` |
+| `fix/demo-screen` | `FLGDEMOSCR` |
+
+Two branches with the *same leaf* (`feature/tobi` and `fix/tobi`) would still collide.
+Acceptable here; add a short hash if it ever matters.
+
+### Branch libraries are dropped before each build
+
+`CREATE TABLE` is not idempotent, so re-running the DDL into a library that already has
+the tables fails. Rather than hide that, a branch build **drops its library first** and
+builds the whole stack from nothing — which also proves the build actually works from a
+clean slate. `main` is never dropped; it holds real flag data, and its DDL steps are
+`--ignore` because the tables existing there is expected, not a fault.
+
 ### `SUBDIRS` must name immediate children
 
 A root `Rules.mk` with `SUBDIRS = src/dspf src/sqlrpgle` fails with

@@ -41,15 +41,33 @@ jobs:
           BRANCH="${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}"
           if [ "$BRANCH" = "main" ]; then
             LIB=FLGDEV
+            EPHEMERAL=no
           else
-            LIB=$(printf 'FLG%s' "$BRANCH" | tr -cd '[:alnum:]' \
+            # Strip the prefix before the first slash. Without this,
+            # feature/tobi and feature/ibmi-ci both truncate to FLGFEATURE
+            # and the second build lands in the first one's library.
+            LEAF="${BRANCH##*/}"
+            LIB=$(printf 'FLG%s' "$LEAF" | tr -cd '[:alnum:]' \
                   | cut -c1-10 | tr '[:lower:]' '[:upper:]')
+            EPHEMERAL=yes
           fi
-          echo "branch=$BRANCH"
+          echo "branch=$BRANCH  leaf=${BRANCH##*/}  library=$LIB"
+          echo "ephemeral=$EPHEMERAL" >> "$GITHUB_OUTPUT"
 
           echo "lib=$LIB" >> "$GITHUB_OUTPUT"
           echo "remote=./ci/${GITHUB_RUN_ID}" >> "$GITHUB_OUTPUT"
           echo "Building into library $LIB"
+
+      - name: Reset the branch library
+        if: steps.target.outputs.ephemeral == 'yes'
+        run: |
+          # A branch library is disposable. Dropping it means every PR build
+          # starts from nothing and proves the whole stack builds, rather than
+          # quietly inheriting objects from a previous run. main is never
+          # dropped - it holds real flag data.
+          LIB='${{ steps.target.outputs.lib }}'
+          export IBMI_PRIVATE_KEY="$(cat "$HOME/.ssh/$SSH_KEY_NAME")"
+          ici --ignore --cl "DLTLIB LIB($LIB)"
 
       - name: Build on the IBM i
         run: |
@@ -63,6 +81,7 @@ jobs:
           test -f "$KEY" || { echo "::error::SSH key not found at $KEY"; exit 1; }
           export IBMI_PRIVATE_KEY="$(cat "$KEY")"
 
+
           # TOBi owns the compiled objects. The data model does not fit its
           # one-target-per-object model (01_tables.sql creates three tables, two
           # triggers and a view in one file), so the DDL and journaling stay as
@@ -71,8 +90,8 @@ jobs:
             --rcwd "$REMOTE" \
             --push "." \
             --ignore --cl "CRTLIB LIB($LIB) TEXT('CI build')" \
-            --cl "RUNSQLSTM SRCSTMF('$ABS/src/ddl/01_tables.sql') COMMIT(*NONE) DFTRDBCOL($LIB)" \
-            --cl "RUNSQLSTM SRCSTMF('$ABS/src/ddl/02_procedures.sql') COMMIT(*NONE) DFTRDBCOL($LIB)" \
+            --ignore --cl "RUNSQLSTM SRCSTMF('$ABS/src/ddl/01_tables.sql') COMMIT(*NONE) DFTRDBCOL($LIB)" \
+            --ignore --cl "RUNSQLSTM SRCSTMF('$ABS/src/ddl/02_procedures.sql') COMMIT(*NONE) DFTRDBCOL($LIB)" \
             --ignore --cl "CRTJRNRCV JRNRCV($LIB/FLAGRCV0)" \
             --ignore --cl "CRTJRN JRN($LIB/QSQJRN) JRNRCV($LIB/FLAGRCV0)" \
             --ignore --cl "STRJRNPF FILE($LIB/FLAGDEF $LIB/FLAGUSR) JRN($LIB/QSQJRN) IMAGES(*BOTH)" \
