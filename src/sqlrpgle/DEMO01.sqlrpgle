@@ -51,7 +51,7 @@ dow *on;
     MODETXT = 'New pricing engine (v2)';
     LISTPRC = basePrice;
     PAYPRC  = basePrice * 0.85;
-    MSGTXT  = 'Loyalty discount for our fav customer applied: 15% off';
+    MSGTXT  = 'Loyalty discount! 15% off';
   else;
     FLAGTXT = 'OFF';
     MODETXT = 'Classic pricing (v1)';
