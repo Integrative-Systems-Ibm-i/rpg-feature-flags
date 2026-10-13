@@ -432,3 +432,7 @@ existing consumers need no recompile.
 Deferred (not in v1, but the data model leaves room): percentage rollouts/segments,
 flag scheduling, multivariate values, per-flag fail-open, and a web admin UI over
 the stored procedures via IBM i Integrated Web Services. See §14 of the design doc.
+
+## License
+
+MIT — see [LICENSE](LICENSE). Copyright (c) 2026 Integrative Systems.
