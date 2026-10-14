@@ -1,0 +1,88 @@
+/* ===================================================================== */
+/*  RUNTESTS  -  Build and run the RPGUnit test suite.                   */
+/*                                                                       */
+/*  Expects .build/FLAGSRVT.sqlrpgle to already exist as EBCDIC CCSID    */
+/*  37. The pipeline does that conversion in PASE, NOT here - see the    */
+/*  note at the bottom.                                                  */
+/*                                                                       */
+/*  This has to be a CL program, for two reasons:                        */
+/*                                                                       */
+/*  1. Every separate PASE command and every ici --cl step gets its OWN  */
+/*     library list. RUCRTTST and RUCALLTST both need RPGUNIT and the    */
+/*     target library on *LIBL, so they have to run in the same job as   */
+/*     the ADDLIBLE.                                                     */
+/*                                                                       */
+/*  2. RUCRTTST / RUCALLTST are called through QCMDEXC rather than       */
+/*     written directly. The CL compiler resolves command names at       */
+/*     COMPILE time, and RPGUNIT is not on the library list then         */
+/*     (CPD0030, severity 30 - no program produced). QCMDEXC defers the  */
+/*     lookup to run time, where the ADDLIBLE above has taken effect.    */
+/*                                                                       */
+/*  Params:                                                              */
+/*    ROOT  IFS path to the repo root        (CHAR 256 - pad it)         */
+/*    LIB   Library holding FLAGSRV/FLAGBND  (CHAR  10 - pad it)         */
+/*                                                                       */
+/*    CRTBNDCL PGM(yourlib/RUNTESTS) SRCSTMF('build/RUNTESTS.clle')      */
+/*    CALL yourlib/RUNTESTS ('/home/you/repo' 'FLGDEV    ')              */
+/* ===================================================================== */
+             PGM        PARM(&ROOT &LIB)
+
+             DCL        VAR(&ROOT) TYPE(*CHAR) LEN(256)
+             DCL        VAR(&LIB)  TYPE(*CHAR) LEN(10)
+             DCL        VAR(&DIR)  TYPE(*CHAR) LEN(256)
+             DCL        VAR(&LIBX) TYPE(*CHAR) LEN(10)
+             DCL        VAR(&EBC)  TYPE(*CHAR) LEN(300)
+             DCL        VAR(&CMD)  TYPE(*CHAR) LEN(900)
+
+             CHGVAR     VAR(&DIR)  VALUE(&ROOT)
+             CHGVAR     VAR(&LIBX) VALUE(&LIB)
+
+             ADDLIBLE   LIB(RPGUNIT)
+             MONMSG     MSGID(CPF2103)
+             ADDLIBLE   LIB(&LIBX)
+             MONMSG     MSGID(CPF2103)
+
+             CHGVAR     VAR(&EBC) VALUE(&DIR *TCAT +
+                          '/.build/FLAGSRVT.sqlrpgle')
+
+             /* --- Build the test program ---------------------------- */
+             CHGVAR     VAR(&CMD) VALUE('RUCRTTST TSTPGM(' *CAT +
+                          &LIBX *TCAT '/FLAGSRVT) SRCSTMF(''' *CAT +
+                          &EBC *TCAT ''') BNDDIR(' *CAT &LIBX *TCAT +
+                          '/FLAGBND) DBGVIEW(*SOURCE)')
+             CALL       PGM(QSYS/QCMDEXC) PARM(&CMD 900)
+
+             /* --- Run it. A failing assertion sends an escape, which   */
+             /* --- fails this program, which fails the pipeline step.   */
+             CHGVAR     VAR(&CMD) VALUE('RUCALLTST TSTPGM(' *CAT +
+                          &LIBX *TCAT '/FLAGSRVT)' *BCAT +
+                          'ORDER(*API) DETAIL(*ALL) OUTPUT(*ALLWAYS)')
+             CALL       PGM(QSYS/QCMDEXC) PARM(&CMD 900)
+
+             SNDPGMMSG  MSG('All tests passed.') MSGTYPE(*COMP)
+
+             /* ================================================= */
+             /*  Why the iconv is not in here:                    */
+             /*                                                   */
+             /*  RUCRTTST forwards the SOURCE FILE's CCSID into   */
+             /*  CVTCCSID. A UTF-8 file yields CVTCCSID(1208),    */
+             /*  which the compiler rejects (SQL8031 - it wants   */
+             /*  EBCDIC), and RUCRTTST has no override. So the    */
+             /*  source must be converted to CCSID 37 first.      */
+             /*                                                   */
+             /*  That conversion CANNOT be done with QSH from     */
+             /*  here. QSH applies CCSID conversion on a '>'      */
+             /*  redirect, so it converts the EBCDIC bytes iconv  */
+             /*  just produced straight back to the target's      */
+             /*  UTF-8 tag - a silent round trip that leaves the  */
+             /*  file byte-identical to the source. setccsid then */
+             /*  mislabels UTF-8 bytes as EBCDIC and the compiler */
+             /*  reads garbage (RNF0257 / RNF7023). PASE does no  */
+             /*  such conversion, so the pipeline runs the iconv  */
+             /*  as a plain PASE command before calling this.     */
+             /*                                                   */
+             /*  Staging into a source member instead also does   */
+             /*  not work: the IFS-path /copy in the test cannot  */
+             /*  resolve from a member (CPF4102).                 */
+             /* ================================================= */
+             ENDPGM
